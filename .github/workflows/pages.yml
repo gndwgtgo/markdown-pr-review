@@ -51,6 +51,9 @@ jobs:
         run: |
           mkdir -p site
           cp package.json LICENSE README.md site/
+          # Without an index the Pages root 404s in a browser, which reads as a broken
+          # deploy even though the installer only ever fetches package.json.
+          cp pages-index.html site/index.html
           cp -r dist site/
           # Only the icon is referenced by package.json; the demo gif is 4MB of nothing
           # the installer asks for.
