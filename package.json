@@ -37,6 +37,13 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "browser": "./dist/extension.js",
+  "capabilities": {
+    "virtualWorkspaces": true,
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
   "contributes": {
     "commands": [
       {
@@ -45,6 +52,16 @@
         "icon": "$(comment-discussion)"
       }
     ],
+    "configuration": {
+      "title": "Markdown PR Review",
+      "properties": {
+        "markdown-pr-review.repository": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "GitHub repository as `owner/repo`. Overrides detection from the git remote or workspace URI. Needed where the workspace carries no repo identity — for example a folder mounted by `vscode-test-web`."
+        }
+      }
+    },
     "menus": {
       "editor/context": [
         {
@@ -58,7 +75,8 @@
   "scripts": {
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "test": "npx tsx test/diagram-anchors.test.ts && npx tsx test/renderer-details.test.ts && npx tsx test/renderer-tables.test.ts && npx tsx test/GitHubClient-mapComment.test.ts && npx tsx test/sanitize-wiring.test.ts",
+    "run-in-browser": "vscode-test-web --extensionDevelopmentPath=. --browserType=chromium .",
+    "test": "npx tsx test/diagram-anchors.test.ts && npx tsx test/renderer-details.test.ts && npx tsx test/renderer-tables.test.ts && npx tsx test/GitHubClient-mapComment.test.ts && npx tsx test/sanitize-wiring.test.ts && npx tsx test/web-compat.test.ts",
     "vscode:prepublish": "node esbuild.mjs --production",
     "postinstall": "node -e \"const {execSync}=require('child_process'),fs=require('fs'),p='node_modules/@esbuild/darwin-x64';if(!fs.existsSync(p)){execSync('npm pack @esbuild/darwin-x64@0.20.2',{stdio:'ignore'});fs.mkdirSync(p,{recursive:true});execSync('tar -xzf esbuild-darwin-x64-0.20.2.tgz -C '+p+' --strip-components=1');fs.unlinkSync('esbuild-darwin-x64-0.20.2.tgz')}\""
   },
@@ -71,6 +89,7 @@
     "@types/markdown-it": "^14.1.0",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-web": "^0.0.81",
     "@vscode/vsce": "^3.0.0",
     "dompurify": "^3.4.15",
     "esbuild": "^0.20.0",

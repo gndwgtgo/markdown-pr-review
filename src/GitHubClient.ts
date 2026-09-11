@@ -54,7 +54,19 @@ async function githubGraphQL<T>(
 
 interface GitHubPull {
   number: number;
-  head: { sha: string };
+  title: string;
+  updated_at: string;
+  user: { login: string };
+  head: { sha: string; ref: string };
+}
+
+export interface OpenPull {
+  prNumber: number;
+  title: string;
+  branch: string;
+  headSha: string;
+  author: string;
+  updatedAt: string;
 }
 
 interface GitHubReviewComment {
@@ -83,6 +95,27 @@ export async function findPrNumber(
     throw new Error(`No open PR found for branch "${branch}" in ${owner}/${repo}.`);
   }
   return { prNumber: pulls[0].number, headSha: pulls[0].head.sha };
+}
+
+// Virtual workspaces have no branch to look a PR up by, so the open PRs are listed for
+// the user to choose from instead.
+export async function listOpenPulls(
+  owner: string,
+  repo: string,
+  token: string
+): Promise<OpenPull[]> {
+  const pulls = await githubRequest<GitHubPull[]>(
+    `/repos/${owner}/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=50`,
+    token
+  );
+  return pulls.map(p => ({
+    prNumber: p.number,
+    title: p.title,
+    branch: p.head.ref,
+    headSha: p.head.sha,
+    author: p.user.login,
+    updatedAt: p.updated_at,
+  }));
 }
 
 function mapComment(raw: GitHubReviewComment): PRComment {
