@@ -26,6 +26,13 @@ async function gitRepositories(): Promise<GitRepository[]> {
   return api.repositories;
 }
 
+/** `owner/repo` from the markdown-pr-review.repository setting, if set to a valid value. */
+function configuredRepo(): { owner: string; repo: string } | undefined {
+  const value = vscode.workspace.getConfiguration('markdown-pr-review').get<string>('repository')?.trim();
+  const match = value?.match(/^([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
+  return match ? { owner: match[1], repo: match[2] } : undefined;
+}
+
 function workspaceRootFor(resource?: vscode.Uri): vscode.Uri {
   const folder = resource ? vscode.workspace.getWorkspaceFolder(resource) : undefined;
   const root = folder?.uri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -40,14 +47,21 @@ export async function getGitContext(resource?: vscode.Uri): Promise<GitContext> 
   // directory to interrogate, but the URI itself carries owner and repo, which is more
   // reliable than parsing a remote URL. Branch is unavailable, so callers ask for a PR number.
   if (root.scheme !== 'file') {
-    const [owner, repo] = root.path.replace(/^\//, '').split('/');
-    if (!root.authority.startsWith('github') || !owner || !repo) {
+    const [uriOwner, uriRepo] = root.path.replace(/^\//, '').split('/');
+    const fromUri = root.authority.startsWith('github') && uriOwner && uriRepo
+      ? { owner: uriOwner, repo: uriRepo }
+      : undefined;
+    // Any other virtual file system (vscode-test-web://mount, a remote FS provider) carries
+    // no repo identity, so fall back to the setting.
+    const target = fromUri ?? configuredRepo();
+    if (!target) {
       throw new Error(
         `Cannot tell which GitHub repo ${root.scheme}://${root.authority} is. ` +
-        'Open the repo via vscode.dev/github/<owner>/<repo>.'
+        'Open it via vscode.dev/github/<owner>/<repo>, or set markdown-pr-review.repository ' +
+        'to "owner/repo".'
       );
     }
-    return { owner, repo, branch: null, rootUri: root };
+    return { ...target, branch: null, rootUri: root };
   }
 
   const repositories = await gitRepositories();
@@ -57,12 +71,16 @@ export async function getGitContext(resource?: vscode.Uri): Promise<GitContext> 
     .sort((a, b) => b.rootUri.path.length - a.rootUri.path.length)[0];
   if (!match) throw new Error('Not a git repository.');
 
+  const branch = match.state.HEAD?.name ?? null;
+  const configured = configuredRepo();
+  if (configured) return { ...configured, branch, rootUri: match.rootUri };
+
   const origin = match.state.remotes.find(r => r.name === 'origin') ?? match.state.remotes[0];
   const remoteUrl = origin?.fetchUrl ?? origin?.pushUrl;
   if (!remoteUrl) throw new Error('No git remote named "origin" found.');
 
   const { owner, repo } = parseGitHubRemote(remoteUrl);
-  return { owner, repo, branch: match.state.HEAD?.name ?? null, rootUri: match.rootUri };
+  return { owner, repo, branch, rootUri: match.rootUri };
 }
 
 // Exported for testability — parses both HTTPS and SSH remote URLs.

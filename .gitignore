@@ -13,3 +13,6 @@ out/
 .worktrees/
 .claude/
 .superpowers/
+
+# @vscode/test-web downloads the VS Code web build here
+.vscode-test-web/
