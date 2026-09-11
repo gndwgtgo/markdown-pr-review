@@ -1,0 +1,70 @@
+name: Sideload site
+
+# Publishes the extension as a folder on GitHub Pages so it can be installed in
+# vscode.dev without going through the Marketplace: in vscode.dev run
+# "Developer: Install Extension From Location..." and enter the Pages URL.
+#
+# The web installer fetches package.json, reads its `browser` entry, then pulls each
+# referenced file by relative path — so the site is the extension layout itself, not a
+# .vsix. Pages serves it over HTTPS with access-control-allow-origin: *, which is what
+# the installer requires, and avoids the local-certificate dance the docs describe.
+#
+# Requires Settings -> Pages -> Source: GitHub Actions.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; a half-published folder is an unusable install URL.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Build
+        # Same production build vsce:prepublish uses: minified, no source maps.
+        run: node esbuild.mjs --production
+
+      - name: Assemble the extension folder
+        run: |
+          mkdir -p site
+          cp package.json LICENSE README.md site/
+          cp -r dist site/
+          # Only the icon is referenced by package.json; the demo gif is 4MB of nothing
+          # the installer asks for.
+          mkdir -p site/images && cp images/icon.png site/images/
+          # dist/ is gitignored, so fail loudly rather than deploy an install URL that
+          # 404s on the entry point.
+          test -f site/dist/extension.js
+          test -f site/dist/webview.js
+          # Pages would otherwise run the folder through Jekyll.
+          touch site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
