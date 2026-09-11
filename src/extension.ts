@@ -8,7 +8,7 @@ import {
   fetchPrFiles,
   fetchPrComments,
   fetchThreadMeta,
-  fetchPrHeadSha,
+  listOpenPulls,
   type PrFilesResult,
 } from './GitHubClient';
 
@@ -59,15 +59,33 @@ async function refreshPrStatusBar(item: vscode.StatusBarItem): Promise<void> {
   }
 }
 
-async function promptForPr(ctx: GitContext, token: string): Promise<{ prNumber: number; headSha: string }> {
-  const input = await vscode.window.showInputBox({
-    title: `Review a PR in ${ctx.owner}/${ctx.repo}`,
-    prompt: 'No git branch is available here, so enter the PR number to review',
-    validateInput: v => (/^\s*\d+\s*$/.test(v) ? undefined : 'Enter a PR number'),
-  });
-  if (!input) throw new Error('Cancelled.');
-  const prNumber = Number(input.trim());
-  return { prNumber, headSha: await fetchPrHeadSha(ctx.owner, ctx.repo, prNumber, token) };
+// Used where there is no branch to match a PR against — a virtual workspace like
+// vscode.dev, or a detached HEAD on desktop. The open PRs are already available from the
+// API the extension uses anyway, so pick from them rather than asking for a number.
+async function pickPr(ctx: GitContext, token: string): Promise<{ prNumber: number; headSha: string }> {
+  const pulls = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: 'Loading open PRs…' },
+    () => listOpenPulls(ctx.owner, ctx.repo, token)
+  );
+  if (pulls.length === 0) {
+    throw new Error(`No open PRs in ${ctx.owner}/${ctx.repo}.`);
+  }
+
+  const picked = await vscode.window.showQuickPick(
+    pulls.map(p => ({
+      label: `$(git-pull-request) #${p.prNumber} ${p.title}`,
+      description: p.branch,
+      detail: `${p.author} · updated ${new Date(p.updatedAt).toLocaleDateString()}`,
+      pull: p,
+    })),
+    {
+      title: `Open PRs in ${ctx.owner}/${ctx.repo}`,
+      placeHolder: 'Pick a PR to review',
+      matchOnDescription: true,
+    }
+  );
+  if (!picked) throw new Error('Cancelled.');
+  return { prNumber: picked.pull.prNumber, headSha: picked.pull.headSha };
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -103,10 +121,10 @@ export function activate(context: vscode.ExtensionContext): void {
       try {
         const ctx = await getGitContext(editor?.document.uri);
         const { token, userLogin } = await getGitHubToken();
-        // Prompt outside withProgress — an input box behind a progress notification is hidden.
+        // Pick outside withProgress — a quick pick behind a progress notification is hidden.
         const { prNumber, headSha } = ctx.branch
           ? await findPrNumber(ctx.owner, ctx.repo, ctx.branch, token)
-          : await promptForPr(ctx, token);
+          : await pickPr(ctx, token);
 
         await vscode.window.withProgress(
           {
