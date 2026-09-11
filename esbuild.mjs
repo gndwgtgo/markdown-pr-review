@@ -10,6 +10,13 @@ mkdirSync('dist', { recursive: true });
 // script tag, avoiding esbuild having to resolve lodash-es internals.
 copyFileSync('node_modules/mermaid/dist/mermaid.min.js', 'dist/mermaid.min.js');
 
+// GitHub's own markdown stylesheet (what mjbvz/vscode-github-markdown-preview-style ships)
+// plus highlight.js' GitHub themes, loaded as plain <link>s. The light/dark hljs pair is
+// switched by the media attribute — VSCode sets prefers-color-scheme from the active theme.
+copyFileSync('node_modules/github-markdown-css/github-markdown.css', 'dist/github-markdown.css');
+copyFileSync('node_modules/highlight.js/styles/github.css', 'dist/hljs-light.css');
+copyFileSync('node_modules/highlight.js/styles/github-dark.css', 'dist/hljs-dark.css');
+
 
 const extensionConfig = {
   entryPoints: ['src/extension.ts'],

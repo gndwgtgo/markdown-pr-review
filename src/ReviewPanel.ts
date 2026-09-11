@@ -309,6 +309,8 @@ export class ReviewPanel {
     const mermaidUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'dist', 'mermaid.min.js')
     );
+    const cssUri = (name: string): vscode.Uri =>
+      webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'dist', name));
     const nonce = getNonce();
 
     return `<!DOCTYPE html>
@@ -316,10 +318,36 @@ export class ReviewPanel {
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src https: data:;">
+    content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource} 'unsafe-inline'; img-src https: data:;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PR Review</title>
+  <link rel="stylesheet" href="${cssUri('github-markdown.css')}">
+  <link rel="stylesheet" href="${cssUri('hljs-light.css')}" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="${cssUri('hljs-dark.css')}" media="(prefers-color-scheme: dark)">
   <style>
+    /* GitHub's stylesheet drives layout and typography; its colours are remapped onto the
+       active VSCode theme so the rendered document still matches the editor. Anything not
+       listed here (alert greens/reds, diff colours) keeps GitHub's own value. */
+    .markdown-body {
+      --fontStack-sansSerif: var(--vscode-font-family);
+      --fontStack-monospace: var(--vscode-editor-font-family);
+      --fgColor-default: var(--vscode-editor-foreground);
+      --fgColor-muted: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+      --fgColor-accent: var(--vscode-textLink-foreground, #4493f8);
+      --bgColor-default: var(--vscode-editor-background);
+      --bgColor-muted: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.1));
+      --bgColor-neutral-muted: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.1));
+      --borderColor-default: var(--vscode-widget-border, rgba(128,128,128,0.35));
+      --borderColor-muted: var(--vscode-widget-border, rgba(128,128,128,0.25));
+      --borderColor-neutral-muted: var(--vscode-widget-border, rgba(128,128,128,0.25));
+      --borderColor-accent-emphasis: var(--vscode-textLink-foreground, #4493f8);
+      --focus-outlineColor: var(--vscode-focusBorder, #007acc);
+      background: transparent;
+    }
+    /* hljs' own theme paints a GitHub background over the code block; the block's
+       background comes from --bgColor-muted above, so drop it. */
+    .markdown-body .hljs,
+    .markdown-body pre code { background: transparent; }
     body {
       font-family: var(--vscode-font-family);
       color: var(--vscode-editor-foreground);
@@ -636,40 +664,6 @@ export class ReviewPanel {
       border: none !important;
     }
     .pr-bubble-cell .pr-bubble { float: none; margin-left: 0; }
-    .pr-content table {
-      border-collapse: collapse;
-      border-spacing: 0;
-      display: block;
-      overflow: auto;
-      width: max-content;
-      max-width: 100%;
-      margin: 1em 0;
-    }
-    .pr-content th,
-    .pr-content td {
-      border: 1px solid #d0d7de;
-      padding: 6px 13px;
-    }
-    .pr-content tr:nth-child(2n) {
-      background-color: #f6f8fa;
-    }
-    .pr-content thead tr {
-      background-color: transparent;
-    }
-    body.vscode-dark .pr-content th,
-    body.vscode-dark .pr-content td {
-      border-color: #30363d;
-    }
-    body.vscode-dark .pr-content tr:nth-child(2n) {
-      background-color: #161b22;
-    }
-    body.vscode-high-contrast .pr-content th,
-    body.vscode-high-contrast .pr-content td {
-      border-color: #30363d;
-    }
-    body.vscode-high-contrast .pr-content tr:nth-child(2n) {
-      background-color: #161b22;
-    }
     .pr-file-select {
       font-size: 12px;
       background: var(--vscode-dropdown-background, #3c3c3c);
@@ -737,7 +731,7 @@ export class ReviewPanel {
 </head>
 <body>
   <div id="review-header"></div>
-  <div id="content" class="pr-content"><p>Loading&#x2026;</p></div>
+  <div id="content" class="pr-content markdown-body"><p>Loading&#x2026;</p></div>
   <script nonce="${nonce}" src="${mermaidUri}"></script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

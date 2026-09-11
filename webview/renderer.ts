@@ -1,10 +1,15 @@
 import MarkdownIt from 'markdown-it';
 import anchor from 'markdown-it-anchor';
 import GithubSlugger from 'github-slugger';
+import hljs from 'highlight.js/lib/common';
 import type Token from 'markdown-it/lib/token.mjs';
 import type StateBlock from 'markdown-it/lib/rules_block/state_block.mjs';
 import type Renderer from 'markdown-it/lib/renderer.mjs';
 import type { Options } from 'markdown-it';
+
+// GitHub renders ```jsonc; highlight.js has no such language. Alias it to javascript
+// rather than json, which would leave the // comments uncoloured.
+hljs.registerAliases(['jsonc'], { languageName: 'javascript' });
 
 function frontMatterRule(state: StateBlock, startLine: number, _endLine: number, silent: boolean): boolean {
   // Only match at the very start of the document.
@@ -41,22 +46,25 @@ function renderFrontMatter(content: string): string {
 }
 
 export function renderMarkdown(rawSource: string): string {
-  const source = rawSource.replace(/<!--[\s\S]*?-->/g, '');
-
-  // <details> blocks: markdown-it with html:false would escape the tags as literal text and
-  // expose all inner content. Extract them before rendering, reconstruct afterward so they
-  // become native collapsible widgets — matching GitHub / VSCode native preview behavior.
-  // Limitation: naïve regex doesn't handle nested <details>; that's an accepted edge case.
-  const detailsBlocks: Array<{ summary: string; inner: string }> = [];
-  const processedSource = source.replace(/<details>([\s\S]*?)<\/details>/gi, (_, body: string) => {
-    const summaryMatch = body.match(/^\s*<summary>([\s\S]*?)<\/summary>/i);
-    const summary = summaryMatch ? summaryMatch[1].trim() : '';
-    const inner = (summaryMatch ? body.slice(summaryMatch[0].length) : body).trim();
-    detailsBlocks.push({ summary, inner });
-    return `DETAILSBLOCK${detailsBlocks.length - 1}END`;
+  // html: true lets GitHub-flavoured inline HTML through (<br> in table cells, <kbd>,
+  // <sub>, native <details>). DOMPurify sanitises the rendered output below, which is the
+  // markdown-it -> sanitise -> mermaid -> overlay pipeline the architecture always specified.
+  const md = new MarkdownIt({
+    html: true,
+    linkify: true,
+    breaks: false,
+    highlight: (str: string, lang: string): string => {
+      const name = lang.trim().toLowerCase();
+      if (!name || !hljs.getLanguage(name)) return '';
+      try {
+        // Return only the inner HTML, never a full <pre>: markdown-it hands a <pre>-prefixed
+        // result straight through and would drop the data-line attr comments anchor to.
+        return hljs.highlight(str, { language: name, ignoreIllegals: true }).value;
+      } catch {
+        return '';
+      }
+    },
   });
-
-  const md = new MarkdownIt({ html: false, linkify: true, breaks: false });
 
   md.block.ruler.before('hr', 'front_matter', frontMatterRule);
   md.renderer.rules['front_matter'] = (tokens, idx) => renderFrontMatter(tokens[idx].content);
@@ -102,21 +110,26 @@ export function renderMarkdown(rawSource: string): string {
     return self.renderToken(tokens, idx, options);
   };
 
-  let rendered = md.render(processedSource);
+  // Raw HTML blocks are emitted verbatim by markdown-it, dropping token attrs. Wrap them
+  // so overlay.ts still finds a data-line to anchor a comment to (e.g. a <details> block).
+  md.renderer.rules['html_block'] = (tokens, idx) => {
+    const t = tokens[idx];
+    return t.map ? `<div data-line="${t.map[0]}">${t.content}</div>` : t.content;
+  };
 
-  // Substitute placeholders back as native <details> elements; inner markdown re-rendered
-  // through the same md instance (html:false still applies, so no XSS surface added).
-  // The surrounding <p> may carry data-line — forward its attrs to <details>.
-  if (detailsBlocks.length > 0) {
-    rendered = rendered.replace(/<p([^>]*)>\s*DETAILSBLOCK(\d+)END\s*<\/p>\n?/g, (_, attrs: string, idxStr: string) => {
-      const { summary, inner } = detailsBlocks[parseInt(idxStr, 10)];
-      const summaryHtml = summary ? md.renderInline(summary) : '';
-      const innerHtml = inner ? md.render(inner) : '';
-      return `<details${attrs}><summary>${summaryHtml}</summary>${innerHtml}</details>\n`;
-    });
-  }
+  const rendered = md.render(rawSource);
 
-  return rendered;
+  // <summary> content sits inside a raw HTML block, so markdown-it leaves it verbatim —
+  // GitHub does the same. Keep rendering it anyway: this extension has always done so and
+  // `<summary>**Title**</summary>` is what people actually write.
+  const withSummaries = rendered.replace(
+    /<summary>([\s\S]*?)<\/summary>/gi,
+    (_, inner: string) => `<summary>${md.renderInline(inner.trim())}</summary>`
+  );
+
+  // NOTE: html: true means this output is unsafe until sanitised. Every caller must go
+  // through setHtml() in sanitize.ts — never assign it to innerHTML directly.
+  return withSummaries;
 }
 
 function escapeHtml(str: string): string {
