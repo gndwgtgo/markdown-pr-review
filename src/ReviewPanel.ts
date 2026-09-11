@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import * as fs from 'fs';
 import type { PRComment, PrFile, RenderMessage, ThreadMeta, WebviewMessage } from './types';
+import { readText } from './GitContext';
 import { postComment, postReply, submitDraftReview, getGitHubToken,
          editComment, deleteComment, resolveThread, unresolveThread,
          fetchPrComments, fetchThreadMeta } from './GitHubClient';
@@ -20,7 +19,7 @@ export interface PrContext {
   repo: string;
   prNumber: number;
   headSha: string;
-  repoRoot: string;
+  rootUri: vscode.Uri;
   filePath: string;
   prFiles: PrFile[];
   validLinesByPath: Map<string, number[]>;
@@ -38,7 +37,7 @@ export class ReviewPanel {
   private _repo = '';
   private _prNumber = 0;
   private _headSha = '';
-  private _repoRoot = '';
+  private _rootUri!: vscode.Uri;
   private _filePath = '';
   private _prFiles: PrFile[] = [];
   private _validLinesByPath = new Map<string, number[]>();
@@ -88,7 +87,7 @@ export class ReviewPanel {
     this._repo = ctx.repo;
     this._prNumber = ctx.prNumber;
     this._headSha = ctx.headSha;
-    this._repoRoot = ctx.repoRoot;
+    this._rootUri = ctx.rootUri;
     this._filePath = ctx.filePath;
     this._prFiles = ctx.prFiles;
     this._validLinesByPath = ctx.validLinesByPath;
@@ -122,7 +121,7 @@ export class ReviewPanel {
   private async _loadAndRender(relPath: string): Promise<void> {
     let markdown: string;
     try {
-      markdown = fs.readFileSync(path.join(this._repoRoot, relPath), 'utf8');
+      markdown = await readText(vscode.Uri.joinPath(this._rootUri, relPath));
     } catch {
       this._panel.webview.postMessage({ type: 'postError', message: `Could not read file: ${relPath}` });
       return;

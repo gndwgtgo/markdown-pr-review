@@ -18,13 +18,17 @@ copyFileSync('node_modules/highlight.js/styles/github.css', 'dist/hljs-light.css
 copyFileSync('node_modules/highlight.js/styles/github-dark.css', 'dist/hljs-dark.css');
 
 
+// One bundle serves both extension hosts: package.json points `main` and `browser` at it.
+// platform: 'browser' is deliberate even for desktop — vscode.dev runs extensions in a Web
+// Worker with no fs/path/child_process, so the build fails loudly if a node import returns.
 const extensionConfig = {
   entryPoints: ['src/extension.ts'],
   bundle: true,
   outfile: 'dist/extension.js',
   external: ['vscode'],
   format: 'cjs',
-  platform: 'node',
+  platform: 'browser',
+  target: 'es2021',
   sourcemap: !production,
   minify: production,
 };

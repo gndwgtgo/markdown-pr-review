@@ -1,8 +1,6 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import * as fs from 'fs';
 import { ReviewPanel } from './ReviewPanel';
-import { getGitContext } from './GitContext';
+import { getGitContext, relativeTo, readText, type GitContext } from './GitContext';
 import type { PrFile } from './types';
 import {
   getGitHubToken,
@@ -10,6 +8,7 @@ import {
   fetchPrFiles,
   fetchPrComments,
   fetchThreadMeta,
+  fetchPrHeadSha,
   type PrFilesResult,
 } from './GitHubClient';
 
@@ -23,10 +22,15 @@ let prStatusCache: { branch: string; prNumber: number | null } | undefined;
 let statusBarDebounce: ReturnType<typeof setTimeout> | undefined;
 
 async function refreshPrStatusBar(item: vscode.StatusBarItem): Promise<void> {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!workspaceRoot) { item.hide(); return; }
   try {
-    const { owner, repo, branch } = getGitContext(workspaceRoot);
+    const { owner, repo, branch } = await getGitContext(vscode.window.activeTextEditor?.document.uri);
+    if (!branch) {
+      // No branch to look a PR up by (virtual workspace). Stay clickable: the command
+      // asks for a PR number instead.
+      item.text = '$(comment-discussion) Markdown PR Review';
+      item.show();
+      return;
+    }
     if (prStatusCache?.branch === branch) {
       if (prStatusCache.prNumber == null) { item.hide(); return; }
       item.text = `$(comment-discussion) PR #${prStatusCache.prNumber}`;
@@ -53,6 +57,17 @@ async function refreshPrStatusBar(item: vscode.StatusBarItem): Promise<void> {
   } catch {
     item.hide();
   }
+}
+
+async function promptForPr(ctx: GitContext, token: string): Promise<{ prNumber: number; headSha: string }> {
+  const input = await vscode.window.showInputBox({
+    title: `Review a PR in ${ctx.owner}/${ctx.repo}`,
+    prompt: 'No git branch is available here, so enter the PR number to review',
+    validateInput: v => (/^\s*\d+\s*$/.test(v) ? undefined : 'Enter a PR number'),
+  });
+  if (!input) throw new Error('Cancelled.');
+  const prNumber = Number(input.trim());
+  return { prNumber, headSha: await fetchPrHeadSha(ctx.owner, ctx.repo, prNumber, token) };
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -84,15 +99,15 @@ export function activate(context: vscode.ExtensionContext): void {
     'markdown-pr-review.openReview',
     async () => {
       const editor = vscode.window.activeTextEditor;
-      const anyFilePath = editor?.document.uri.fsPath
-        ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-
-      if (!anyFilePath) {
-        vscode.window.showErrorMessage('PR Review: Open a workspace or file first.');
-        return;
-      }
 
       try {
+        const ctx = await getGitContext(editor?.document.uri);
+        const { token, userLogin } = await getGitHubToken();
+        // Prompt outside withProgress — an input box behind a progress notification is hidden.
+        const { prNumber, headSha } = ctx.branch
+          ? await findPrNumber(ctx.owner, ctx.repo, ctx.branch, token)
+          : await promptForPr(ctx, token);
+
         await vscode.window.withProgress(
           {
             location: vscode.ProgressLocation.Notification,
@@ -100,25 +115,14 @@ export function activate(context: vscode.ExtensionContext): void {
             cancellable: false,
           },
           async () => {
-            const startDir = fs.statSync(anyFilePath).isDirectory()
-              ? anyFilePath
-              : path.dirname(anyFilePath);
-            const { owner, repo, branch, repoRoot } = getGitContext(startDir);
-
-            const { token, userLogin } = await getGitHubToken();
-            const { prNumber, headSha } = await findPrNumber(owner, repo, branch, token);
-
+            const { owner, repo, rootUri } = ctx;
             const { mdFiles, validLinesByPath }: PrFilesResult = await fetchPrFiles(owner, repo, prNumber, token);
             if (mdFiles.length === 0) {
               throw new Error('This PR has no markdown files.');
             }
 
             // Resolve active editor path before fetching so we can pick the right initial file
-            let activeRelPath: string | null = null;
-            if (editor) {
-              const realActive = fs.realpathSync(editor.document.uri.fsPath);
-              activeRelPath = path.relative(repoRoot, realActive).replace(/\\/g, '/');
-            }
+            const activeRelPath = editor ? relativeTo(rootUri, editor.document.uri) : null;
 
             const threadMetaResult = await fetchThreadMeta(owner, repo, prNumber, token).catch(() => []);
             const openByFile: Record<string, number> = {};
@@ -138,7 +142,7 @@ export function activate(context: vscode.ExtensionContext): void {
               resolvedCount: resolvedByFile[p] ?? 0,
             }));
 
-            const markdown = fs.readFileSync(path.join(repoRoot, selectedFile), 'utf8');
+            const markdown = await readText(vscode.Uri.joinPath(rootUri, selectedFile));
 
             const panel = ReviewPanel.createOrShow(context.extensionUri);
             panel.render(
@@ -150,7 +154,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 repo,
                 prNumber,
                 headSha,
-                repoRoot,
+                rootUri,
                 filePath: selectedFile,
                 prFiles,
                 validLinesByPath,

@@ -85,6 +85,18 @@ export async function findPrNumber(
   return { prNumber: pulls[0].number, headSha: pulls[0].head.sha };
 }
 
+// Virtual workspaces have no branch to look a PR up by, so the PR number is entered
+// by hand and only its head SHA needs fetching.
+export async function fetchPrHeadSha(
+  owner: string,
+  repo: string,
+  prNumber: number,
+  token: string
+): Promise<string> {
+  const pull = await githubRequest<GitHubPull>(`/repos/${owner}/${repo}/pulls/${prNumber}`, token);
+  return pull.head.sha;
+}
+
 function mapComment(raw: GitHubReviewComment): PRComment {
   const line = raw.line ?? raw.original_line;
   if (line == null) throw new Error(`mapComment: comment ${raw.id} has no line number`);
