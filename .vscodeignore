@@ -19,3 +19,4 @@ test/**
 *.code-workspace
 .claude/**
 .superpowers/**
+web-local.sh
