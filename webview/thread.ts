@@ -1,5 +1,6 @@
 import type { PRComment } from '../src/types';
 import { renderMarkdown } from './renderer';
+import { setHtml } from './sanitize';
 
 export type OnReply = (panel: HTMLElement, rootId: number, line: number) => void;
 
@@ -218,7 +219,7 @@ function buildPanel(comments: PRComment[], threadId: number, options?: ThreadOpt
 
     const body = document.createElement('div');
     body.className = 'pr-thread-body';
-    body.innerHTML = renderMarkdown(comment.body);
+    setHtml(body, renderMarkdown(comment.body));
 
     item.appendChild(header);
     item.appendChild(body);

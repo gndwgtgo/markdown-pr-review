@@ -1,4 +1,5 @@
 import { renderMarkdown } from './renderer';
+import { setHtml } from './sanitize';
 import { placeOverlays, initSelectionHandlers, type OverlayCallbacks } from './overlay';
 import { resolveDiagramAnchors, type Point } from './diagram-anchors';
 import { createComposeBox } from './compose';
@@ -326,7 +327,7 @@ async function handleRender(msg: RenderMessage): Promise<void> {
   }
 
   currentMarkdown = msg.markdown;
-  contentEl.innerHTML = renderMarkdown(msg.markdown);
+  setHtml(contentEl, renderMarkdown(msg.markdown));
 
   const isDark =
     document.body.classList.contains('vscode-dark') ||
